@@ -1,3 +1,6 @@
+/* utils.c - some useful functions that can be used elsewhere.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
