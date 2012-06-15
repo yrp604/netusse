@@ -1,0 +1,10 @@
+#!/usr/sbin/dtrace -s
+# This fucking script prints stacktrace of every malloc(size, M_TEMP).
+
+fbt:kernel:malloc:entry
+{
+    mt = (struct malloc_type *) arg1;
+    printf("malloc(%u, %s)\n", arg0, mt->ks_shortdesc);
+    stack();
+    printf("\n\n");
+}

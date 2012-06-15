@@ -1,15 +1,20 @@
 /*
  * netusse.c - fucking kernel networking stacks destroyer.
  *
- * At least it successfully broke:
+ * At least it broke^Wbreaks:
  *  FreeBSD
  *  NetBSD
  *  OpenBSD
  *  Solaris
  *  Linux
- *  MACOSX
+ *  MacOSX
+ * 
+ * "THE BEER-WARE LICENSE" (Revision 42):
+ * <clemun@gmail.com> wrote this file. As long as you retain this notice you
+ * can do whatever you want with this stuff. If we meet some day, and you think
+ * this stuff is worth it, you can buy me a beer in return Clement LECIGNE.
  *
- * Copyright (c) Clément Lecigne, 2006-2012
+ * clem1 - 2006-2012
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,7 +23,6 @@
 #include <signal.h>
 #include <getopt.h>
 #include <string.h>
-#include <stropts.h>
 #define _GNU_SOURCE
 #include <fcntl.h>
 
@@ -34,16 +38,17 @@
 #include <arpa/inet.h>
 
 #ifdef __linux__
+#include <stropts.h>
 #include <sys/sendfile.h>
 #include <sys/klog.h>
 #include <linux/atalk.h>
 #include <linux/can.h>
 #else
 #include <sys/uio.h>
+#include <sys/ioctl.h>
 #endif
 
-
-#if defined(__OpenBSD__)
+#ifdef __OpenBSD__ /* -lutil */
 #include <util.h>
 #endif
 
@@ -68,6 +73,11 @@ int g_sockproto;
 /* current socket domain
  */
 int g_sockdomain;
+
+/* used when random buffer is needed.
+ */
+#define GARBAGE_SIZE 4096
+char g_garbage[GARBAGE_SIZE];
 
 /* return a random valid socket.
  */
@@ -100,7 +110,7 @@ static void fuzziovec(struct iovec *io, size_t len)
 }
 #endif
 
-#define PAUSE() printf("<PAUSE>\n"), fflush(stdout), getchar();
+#define PAUSE() {printf("<PAUSE>\n"); while (getchar() != '\n');}
 
 #ifdef __linux__
 /* check for OOPS and suspicious message in dmesg...
@@ -139,7 +149,7 @@ static void linux_check()
 
     return;
 }
-#else /* TODO: no check for other OSes */
+#else /* TODO: no check for other OSes (e.g. check for REDZONE msg in FreeBSD) */
 #define check()
 #endif
 
@@ -269,72 +279,42 @@ void ioctlusse(int s)
     while (ret == -1 && tout--);
 }
 
-/* fuzzing getsockname()
+/* fuzzing for getsockname() and getpeername()
  */
-void getsocknamusse(int s)
+void getnamusse(int s)
 {
-    unsigned char   buf[2048], pbuf[2048];
-    unsigned int    len2, len = 0;
+    unsigned char   b1[2048], b2[2048];
+    unsigned int    l1, l2;
     int             ret, i;
+    int             (*fn)(int, struct sockaddr *, socklen_t *);
 
-    memset(&buf, 'A', 2048);
-    memset(&pbuf, 'A', 2048);
+    /* pick one
+     */
+    fn = (rand() % 2) ? &getsockname : &getpeername;
 
-    for ( i = 0 ; i < 20 ; i++ )
+    memset(&b1, 'A', 2048);
+    memset(&b2, 'A', 2048);
+
+    for (i = 0; i < 20; i++)
     {
-        len2 = len = rand() % 2048;
-        ret = getsockname(s, (struct sockaddr *)&buf, (socklen_t *)&len2);
+        l1 = l2 = rand() % 2048;
+        ret = fn(s, (struct sockaddr *)&b1, (socklen_t *)&l1);
         if (ret >= 0)
         {
-            kernop(s);
-            getsockname(s, (struct sockaddr *)&pbuf, &len);
-            if (memcmp(&buf, &pbuf, len) != 0)
+            kernop();
+            fn(s, (struct sockaddr *)&b2, &l2);
+            if (l1 == l2 && memcmp(&b1, &b2, l1) != 0)
             {
                 printf("\nPOSSIBLE LEAK WITH :\n");
-                printf("\tgetsockname(sock (%u, %u, %u), buf, &%d)\n", g_sockdomain, g_socktype, g_sockproto, len);
-                len = (len < 0 || len > 2048) ? 2048 : len;
+                printf("\t%s(sock (%u, %u, %u), buf, &%d)\n",
+                        (fn == &getsockname) ? "getsockname" : "getpeername",
+                        g_sockdomain, g_socktype, g_sockproto, l1);
                 printf("FIRST CALL:\n");
-                dump(buf, len);
+                dump(b1, l1);
                 printf("SECOND CALL:\n");
-                dump(pbuf, len);
+                dump(b2, l2);
                 PAUSE();
             }
-            break;
-        }
-    }
-}
-
-/* fuzzing getpeername()
- */
-void getpeernamusse(int s)
-{
-    unsigned char   buf[2048], pbuf[2048];
-    unsigned int    len = 0;
-    int             ret, i;
-
-    memset(&buf, 'A', 2048);
-    memset(&pbuf, 'A', 2048);
-
-    for ( i = 0 ; i < 20 ; i++ )
-    {
-        len = rand() % 2048;
-        ret = getpeername(s, (struct sockaddr *)&buf, &len);
-        if (ret >= 0 && memcmp(&buf, &pbuf, (len < 0 || len > 2048) ? 2048 : len) != 0)
-        {
-            kernop(s);
-            getpeername(s, (struct sockaddr *)&pbuf, &len);
-            if (memcmp(&buf, &pbuf, (len < 0 || len > 2048) ? 2048 : len) != 0)
-            {
-                printf("\nPOSSIBLE LEAK WITH :\n");
-                printf("\tgetpeername(sock (%u, %u, %u), buf, &%d)\n", g_sockdomain, g_socktype, g_sockproto, len);
-                len = (len < 0 || len > 2048) ? 2048 : len;
-                printf("FIRST CALL:\n");
-                dump(buf, len);
-                printf("SECOND CALL:\n");
-                dump(pbuf, len);
-                PAUSE();
-            }
-
             break;
         }
     }
@@ -344,20 +324,19 @@ void getpeernamusse(int s)
  */
 void gsoptusse(int s)
 {
-	unsigned char   buf[2048], pbuf[2048], rbuf[2048];
+	unsigned char   b1[2048], b2[2048];
 	int             optname, level, ret, tout;
-    unsigned int    len;
+    unsigned int    l1, l2;
 
 	tout = 5;
 
-    memset(&buf, 'A', 2048);
-    memset(&pbuf, 'A', 2048);
-    memset(&rbuf, 'A', 2048);
+    memset(&b1, 'A', 2048);
+    memset(&b2, 'A', 2048);
 
 	do
 	{
 		optname = rand() % 255;
-		len = evilint();
+		l1 = l2 = evilint();
 		switch (rand() % 15)
 		{
 		case 0:
@@ -388,7 +367,7 @@ void gsoptusse(int s)
 				|| optname == IPV6_FW_DEL || optname == IPV6_FW_ZERO || (current_family == AF_INET && optname == 21) || (current_family == AF_INET6 && optname == 21) )
 			continue;
 #endif
-		ret = getsockopt(s, level, optname, &buf, &len);
+		ret = getsockopt(s, level, optname, &b1, &l1);
 		tout--;
 	}
     while (ret == -1 && tout);
@@ -405,18 +384,19 @@ void gsoptusse(int s)
 #endif
 #endif
 
-    kernop(s);
-    getsockopt(s, level, optname, &pbuf, &len);
+    /* kernop and retry
+     */
+    kernop();
+    getsockopt(s, level, optname, &b2, &l2);
 
-    if (buf[0] == 0xc7 || buf[0] == 0xc8 || ( memcmp(&buf, &pbuf, (len < 0 || len > 2048) ? 2048 : len) != 0 && memcmp(&pbuf, &rbuf, (len > 2048) ? 2048 : len) != 0 ))
+    if (l1 < 2048 && l1 == l2 && memcmp(&b1, &b2, l1) != 0)
     {
         printf("\nPOSSIBLE LEAK WITH :\n");
-		printf("\tgetsockopt(sock (%u, %u, %u), %d, %u, buf, &%d)\n", g_sockdomain, g_socktype, g_sockproto, level, optname, len);
-        len = (len < 0 || len > 2048) ? 2048 : len;
+		printf("\tgetsockopt(sock (%u, %u, %u), %d, %u, buf, &%d)\n", g_sockdomain, g_socktype, g_sockproto, level, optname, l1);
         printf("FIRST CALL:\n");
-        dump(buf, len);
+        dump(b1, l1);
         printf("SECOND CALL:\n");
-        dump(pbuf, len);
+        dump(b2, l2);
         PAUSE();
     }
 
@@ -468,49 +448,29 @@ void listenusse(int s)
     listen(s, evilint());
 }
 
-/* fucking bind()
+/* fucking bind() or connect()
  */
-void bindusse(int fd)
+void connectbindusse(int fd)
 {
-    size_t              len;
-    int                 ret = -1, tout = 5;
-    char                *b;
+    size_t      len;
+    int         ret = -1, tout = 5;
+    char        *b;
+    int         (*fn)(int, const struct sockaddr *, socklen_t);
+
+    /* pick one
+     */
+    fn = (rand() % 2) ? &connect : &bind;
 
     do
     {
-        len = evilint() % 4096;
-        b = malloc(len);
-        if (!b) continue;
-        sockaddrfuzz(b, len);
-        debug("bind(%d, x, %zu)\n", fd, len);
-        ret = bind(fd, (struct sockaddr *)&b, len);
-        if (ret && (rand() % 2))
-            listen(fd, rand());
-        free(b); b = NULL;
+        len = evilint();
+        b = g_garbage;
+        sockaddrfuzz(b, min(len, GARBAGE_SIZE));
+        ret = fn(fd, (struct sockaddr *)&b, len);
     }
     while (ret < 0 && tout--);
 }
 
-/* fuzzing connect()
- */
-void connectusse(int fd)
-{
-    int                 ret = -1, tout = 5;
-    size_t              len;
-    char                *b;
-
-    do
-    {
-        len = evilint() % 4096;
-        b = malloc(len);
-        if (!b) continue;
-        sockaddrfuzz(b, len);
-        debug("connect(%d, x, %zu)\n", fd, len);
-        ret = connect(fd, (struct sockaddr *)&b, len);
-        if (b) free(b), b = NULL;
-    }
-    while (ret < 0 && tout--);
-}
 
 /* fuzing sendto()
  */
@@ -520,14 +480,13 @@ void sendtousse(int fd)
     size_t  alen, mlen;
     int     flags = 0;
 
-    alen = evilint() % 4096;
-    addr = malloc(alen);
-    if (addr) sockaddrfuzz(addr, alen);
+    alen = evilint();
+    addr = g_garbage;
+    if (addr) sockaddrfuzz(addr, min(alen, GARBAGE_SIZE));
     mlen = evilint();
     msg = malloc(mlen);
     if (msg != NULL && mlen < 0xFFFFF) fuzzer(msg, mlen);
     sendto(fd, msg, mlen, flags, (struct sockaddr *)addr, (socklen_t)alen);
-    if (addr) free(addr);
     if (msg) free(msg);
 }
 
@@ -538,7 +497,7 @@ void sendfilusse(int fd)
 {
     int i;
 
-    for ( i = 0 ; i < 50 ; i++ )
+    for (i = 0; i < 50; i++)
     {
         off_t   offset;
         size_t  size;
@@ -571,9 +530,9 @@ void sendfilusse(int fd)
         }
 
         sendfile(ifd, ofd, &offset, size);
-        if (ifd != fd)
+        if (ifd != fd && ifd > 3)
             close(ifd);
-        if (ofd != fd)
+        if (ofd != fd && ofd > 3)
             close(ofd);
     }
 }
@@ -582,7 +541,7 @@ void sendfilusse(int fd)
 {
     int i;
 
-    for ( i = 0 ; i < 50 ; i++ )
+    for (i = 0; i < 50; i++)
     {
         off_t           offset;
         size_t          size;
@@ -643,7 +602,7 @@ void sendfilusse(int fd)
         }
 
         sendfile(ifd, fd, offset, size, hdtrp, NULL, flags);
-        if (ifd != fd)
+        if (ifd != fd && ifd > 3)
             close(ifd);
     }
 }
@@ -659,7 +618,7 @@ void recvmsgusse(int fd)
     struct msghdr msg;
     int i;
 
-    for ( i = 0 ; i < 50 ; i++ )
+    for (i = 0; i < 50; i++)
     {
         fuzzer(name, 1024);
         fuzzer(base, 1024);
@@ -695,7 +654,7 @@ void recvmsgusse(int fd)
     char            *b = NULL;
     int             i;
 
-    for ( i = 0 ; i < 50 ; i++ )
+    for (i = 0; i < 50; i++)
     {
         msg.msg_controllen = (rand() % 50) ? rand() & 0xFFFF : 0;
         if (msg.msg_controllen)
@@ -752,13 +711,13 @@ nocmsghdr:
 #if defined(__NetBSD__) || defined(__OpenBSD__) || defined(__FreeBSD__)
 void sendmsgusse(int fd)
 {
-    char name[1024], ctrl[1024], base[1024], iovb[sizeof(struct iovec)], *b = NULL, *bb = NULL;
+    char *b = NULL, *bb = NULL;
     struct iovec iov;
     struct msghdr msg;
     struct cmsghdr *cmsg;
     int i;
 
-    for ( i = 0 ; i < 50 ; i++ )
+    for (i = 0; i < 50; i++)
     {
         msg.msg_controllen = (rand() % 50) ? rand() : 0;
         if (msg.msg_controllen)
@@ -775,7 +734,6 @@ void sendmsgusse(int fd)
         }
         else
         {
-nocmsghdr:
             msg.msg_control = (rand() % 5) ? NULL : (void*)evilint();
             msg.msg_controllen = (rand() % 2) ? rand() : 0;
         }
@@ -809,6 +767,12 @@ nocmsghdr:
 
     return;
 }
+
+void splicusse(int fd)
+{
+    return;
+}
+
 #elif defined(__linux__)
 void sendmsgusse(int fd)
 {
@@ -818,7 +782,7 @@ void sendmsgusse(int fd)
     char            *b = NULL, *bb = NULL;
     int             i;
 
-    for ( i = 0 ; i < 50 ; i++ )
+    for (i = 0; i < 50; i++)
     {
         msg.msg_controllen = (rand() % 50) ? rand() : 0;
         if (msg.msg_controllen)
@@ -925,7 +889,7 @@ void mmapusse(int fd)
 {
     void    *addr, *raddr;
     int     flags, prot;
-    size_t  len, off;
+    size_t  len;
 
     switch (rand() % 5)
     {
@@ -951,8 +915,8 @@ void mmapusse(int fd)
             break;
     }
 
-    raddr = mmap(addr, (len=evilint()), prot, flags, fd, (off=evilint()));
-
+    len = (rand() % 5) ? 4096 : evilint();
+    raddr = mmap(addr, len, prot, flags, fd, (rand() % 5) ? 4096 : evilint());
     if (raddr != MAP_FAILED)
         munmap(addr, len);
 }
@@ -977,16 +941,14 @@ struct foo_ip_mreq_source
  */
 void valid_op(int s)
 {
-    struct ip_mreqn mr;
 #ifdef __linux__
+    struct ip_mreqn mr;
     struct foo_ip_mreq_source ms;
 #endif
     int             val = 1, flags;
     unsigned char   ttl = rand() % 255;
 #ifdef __linux__
     char   *dev = (rand() % 2) ? "eth0" : "wlan0";
-#else
-    char   *dev = "lo0";
 #endif
 
     /* non-blocking sock */
@@ -1040,11 +1002,15 @@ void valid_op(int s)
 #ifdef TCP_NOPUSH
     if (rand() % 5 == 0) setsockopt(s, IPPROTO_TCP, TCP_NOPUSH, (char *)&val, sizeof(val));
 #endif
+#ifdef IP_PKTINFO
     if (rand() % 5 == 0) setsockopt(s, IPPROTO_IP, IP_PKTINFO, (char *)&val, sizeof(val));
+#endif
 	if (rand() % 5 == 0) val = evilint(), setsockopt(s, SOL_SOCKET, SO_RCVBUF, (char *)&val, sizeof(val));
 	if (rand() % 5 == 0) val = evilint(), setsockopt(s, SOL_SOCKET, SO_SNDBUF, (char *)&val, sizeof(val));
 	if (rand() % 5 == 0) val = evilint(), setsockopt(s, SOL_SOCKET, SO_SNDLOWAT, (char *)&val, sizeof(val));
+#ifdef SOL_TCP
 	if (rand() % 5 == 0) val = evilint(), setsockopt(s, SOL_TCP, TCP_MAXSEG, (char *)&val, sizeof(val));
+#endif
 
 #ifdef __linux__
     if (rand() % 5 == 0) setsockopt(s, SOL_SOCKET, SO_BINDTODEVICE, dev, 4);
@@ -1069,13 +1035,11 @@ void random_op(int s)
         &recvmsgusse,
         &sendtousse,
         &sendfilusse,
-        &bindusse,
+        &connectbindusse,
         &listenusse,
-        &connectusse,
         &splicusse,
         &sendtousse,
-        //&getsocknamusse,
-        &getpeernamusse,
+        &getnamusse,
         &mmapusse,
     };
     randops[rand()%sizeof(randops)/sizeof(randops[0])](s);

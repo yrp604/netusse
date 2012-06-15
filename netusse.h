@@ -163,7 +163,7 @@ const int socket_domains[] = {
 
 
 /* utils.c */
-void kernop(int fd);
+void kernop(void);
 char *getfile(void);
 int getfd(void);
 int evilint(void);

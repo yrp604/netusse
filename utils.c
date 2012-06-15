@@ -1,4 +1,9 @@
 /* utils.c - some useful functions that can be used elsewhere.
+ *
+ * "THE BEER-WARE LICENSE" (Revision 42):
+ * <clemun@gmail.com> wrote this file. As long as you retain this notice you
+ * can do whatever you want with this stuff. If we meet some day, and you think
+ * this stuff is worth it, you can buy me a beer in return Clement LECIGNE.
  */
 
 #include <stdio.h>
@@ -12,47 +17,27 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
 
 /* do a random kernel operation, used to detect memory disclosure.
  */
-void kernop(int fd)
+void kernop(void)
 {
-    /* stolen from Jon Oberheide sploits
-    */
-#ifdef __linux__
-    const int   randcalls[] = {
-        __NR_getitimer, __NR_getpid,
-        __NR_getdents, __NR_getcwd, 
-        __NR_getrlimit, __NR_getuid, __NR_getgid, __NR_geteuid, __NR_getegid,
-        __NR_getppid, __NR_getpgrp, __NR_getgroups,
-        __NR_getpgid, __NR_getsid, 
-    };
-#endif
-    const int       randsopts[] = { SOL_SOCKET };
-    int             ret, o;
+    const int       randsopts[] = { SOL_SOCKET, IPPROTO_IPV6, IPPROTO_IP, IPPROTO_TCP };
+    int             ret;
     unsigned int    len;
     char            buf[1024];
-
+    int             s;
+    s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s < 0)
+        return;
     do
     {
-        switch ( rand() % 2 )
-        {
-#ifdef __linux__
-            case 0:
-                o = randcalls[rand() % sizeof(randcalls)/sizeof(randcalls[0])];
-                ret = syscall(o);
-                break;
-#else
-            case 0: /* TODO: to bored to enumerate unevil syscall on other sys. */
-#endif
-            case 1:
-            default:
-                len = (rand() % 2) ? sizeof(int) : sizeof(buf);
-                ret = getsockopt(fd, randsopts[rand() % sizeof(randsopts)/sizeof(randsopts[0])], rand() % 130, &buf, &len);
-                break;
-        }
+        len = (rand() % 2) ? sizeof(int) : sizeof(buf);
+        ret = getsockopt(s, randsopts[rand() % sizeof(randsopts)/sizeof(randsopts[0])], rand() % 130, &buf, &len);
     }
-    while ( ret < 0 );
+    while (ret < 0);
+    close(s);
 }
 
 /* return random filename on the FS or not.
@@ -79,10 +64,6 @@ char *getfile(void)
     return "foo";
 }
 
-/* in netusse.c and used here, crap++
- */
-int random_socket(void);
-
 /* return a random file descriptor
  */
 int getfd(void)
@@ -96,7 +77,7 @@ int getfd(void)
                 fd = open("/etc/passwd", O_RDONLY);
                 break;
             case 1:
-                fd = random_socket();
+                fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
                 break;
             case 2:
                 fd = open("/dev/random", O_RDONLY);
