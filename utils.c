@@ -18,6 +18,9 @@
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#ifdef __OpenBSD__ /* -lutil */
+#include <util.h>
+#endif
 
 /* do a random kernel operation, used to detect memory disclosure.
  */
