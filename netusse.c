@@ -23,6 +23,7 @@
 #include <signal.h>
 #include <getopt.h>
 #include <string.h>
+#include <stdint.h>
 #define _GNU_SOURCE
 #include <fcntl.h>
 
@@ -46,10 +47,6 @@
 #else
 #include <sys/uio.h>
 #include <sys/ioctl.h>
-#endif
-
-#ifdef __OpenBSD__ /* -lutil */
-#include <util.h>
 #endif
 
 #include "netusse.h"
@@ -96,7 +93,7 @@ int random_socket(void)
     return ret;
 }
 
-#ifdef __FreeBSD__
+#ifndef __linux__
 static void fuzziovec(struct iovec *io, size_t len)
 {
     size_t i;
@@ -536,7 +533,7 @@ void sendfilusse(int fd)
             close(ofd);
     }
 }
-#elif defined(__FreeBSD__)
+#elif __FreeBSD__
 void sendfilusse(int fd)
 {
     int i;
@@ -605,6 +602,11 @@ void sendfilusse(int fd)
         if (ifd != fd && ifd > 3)
             close(ifd);
     }
+}
+#else
+void sendfilusse(int fd)
+{
+    return;
 }
 #endif
 
@@ -923,7 +925,7 @@ void mmapusse(int fd)
 
 void usage(char *prog)
 {
-	printf("\tusage: %s [-r seed][-n occ][-o occ][-f]\n", prog);
+	printf("\tusage: %s [-s][-r seed][-n occ][-o occ][-f]\n", prog);
     printf("Read the sources for further information... :-)\n");
 	exit(EXIT_FAILURE);
 }
@@ -937,7 +939,7 @@ struct foo_ip_mreq_source
 };
 #endif
 
-/* do some interesting valid operation on the socket.
+/* do some interesting valid operations on the socket.
  */
 void valid_op(int s)
 {
@@ -1016,8 +1018,9 @@ void valid_op(int s)
     if (rand() % 5 == 0) setsockopt(s, SOL_SOCKET, SO_BINDTODEVICE, dev, 4);
 #endif
 
-    /* TODO: add FreeBSD multicast/ipv6/sctp stuffs :) */
+    /* TODO: add xxxBSD multicast/ipv6/sctp/atalk/ipx/smb stuffs :) */
 
+    /* Code your own valid socket operation and pwndaworld */
     return;
 }
 
@@ -1045,9 +1048,24 @@ void random_op(int s)
     randops[rand()%sizeof(randops)/sizeof(randops[0])](s);
 }
 
+/* fork?
+ */
+void forkusse(int s)
+{
+    unsigned int i, opts = rand() % 4000;
+    if (rand() % 10 == 0)
+    {
+        if (fork() == 0)
+        {
+            for (i = 0; i < opts; i++) random_op(s);
+            exit(0);
+        }
+    }
+}
+
 int main(int ac, char **av)
 {
-	char            c;
+	char            c, sleep;
 	int             s, i;
 	unsigned int    seed, occ, opts;
 
@@ -1056,12 +1074,13 @@ int main(int ac, char **av)
 	seed = getpid() ^ time(NULL);
 	occ = 5000000;
 	opts = 50;
+    sleep = 0;
 
     /* (gdb) handle SIGPIPE nostop noprint pass */
     signal(SIGPIPE, SIG_IGN);
 
     /* arg parsing */
-	while ((c = getopt(ac, av, "r:o:n:f")) != EOF)
+	while ((c = getopt(ac, av, "sr:o:n:f")) != EOF)
 	{
 		switch (c)
 		{
@@ -1081,6 +1100,9 @@ int main(int ac, char **av)
                 read(s, &seed, sizeof(seed));
                 close(s);
             }
+            break;
+        case 's':
+            sleep = 1;
             break;
 		case 'h':
 			usage(av[0]);
@@ -1106,9 +1128,11 @@ int main(int ac, char **av)
 	{
         s = random_socket();
         valid_op(s);
-		for (i = 0; i < opts; i++) random_op(s);
-		close(s);
+        forkusse(s);
+        for (i = 0; i < opts; i++) random_op(s);
+		close(s); /* still in forkusse? we don't care. */
         check();
+        if (sleep) usleep(500);
         if (!DEBUG) printf("."), fflush(stdout);
 	}
 
