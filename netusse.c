@@ -26,8 +26,11 @@
 #include <stdint.h>
 #define _GNU_SOURCE
 #include <fcntl.h>
+#include <stropts.h>
+#include <poll.h>
 
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <sys/types.h>
 #include <sys/syscall.h>
 #include <sys/mman.h>
@@ -48,6 +51,7 @@
 #include <sys/uio.h>
 #include <sys/ioctl.h>
 #endif
+
 
 #include "netusse.h"
 
@@ -139,6 +143,14 @@ static void linux_check()
         if (strstr(buf, "WARNING: at"))
         {
             printf("dmesg [warning]: %s\n", buf);
+            PAUSE();
+            return;
+        }
+
+        /* PAX with gcc integer overflow plugin. */
+        if (strstr(buf, "size overflow detected"))
+        {
+            printf("dmesg [intover]: %s\n", buf);
             PAUSE();
             return;
         }
@@ -468,6 +480,48 @@ void connectbindusse(int fd)
     while (ret < 0 && tout--);
 }
 
+/* fucking accept()
+ */
+void acceptusse(int fd)
+{
+    size_t      len;
+    int         ret = -1, tout = 5;
+    char        *b;
+
+    do
+    {
+        len = evilint();
+        b = g_garbage;
+        sockaddrfuzz(b, min(len, GARBAGE_SIZE));
+        ret = accept(fd, (struct sockaddr *)&b, (socklen_t *)&len);
+    }
+    while (ret < 0 && tout--);
+}
+
+/* fucking select()
+ */
+void selectusse(int fd)
+{
+    fd_set fds;
+    struct timeval tv;
+    FD_ZERO(&fds);
+    FD_SET(fd, &fds);
+    tv.tv_sec = 0;
+    tv.tv_usec = 100;
+    select(fd + 1, &fds, &fds, &fds, &tv);
+    /* TODO: pselect */
+}
+
+/* fucking poll()
+ */
+void pollusse(int fd)
+{
+    struct pollfd fds[1];
+
+    fds[0].fd = fd;
+    fds[0].events = rand();
+    poll(fds, 1, 100);
+}
 
 /* fuzing sendto()
  */
@@ -1037,6 +1091,9 @@ void random_op(int s)
         &sendmsgusse,
         &recvmsgusse,
         &sendtousse,
+        &acceptusse,
+        &selectusse,
+        &pollusse,
         &sendfilusse,
         &connectbindusse,
         &listenusse,
