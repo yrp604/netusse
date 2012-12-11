@@ -1,5 +1,5 @@
 all:
-	gcc -o netusse netusse.c utils.c -O3
+	gcc -o netusse netusse.c utils.c -g
 
 clean:
 	@rm netusse
