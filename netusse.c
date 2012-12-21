@@ -1131,8 +1131,7 @@ void forkusse(int s)
 
 int main(int ac, char **av)
 {
-  char            c, sleep;
-  int             s, i;
+  int             s, i, c, sleep;
   unsigned int    seed, occ, opts;
 
   /* init */
@@ -1207,3 +1206,4 @@ int main(int ac, char **av)
 
   exit(EXIT_SUCCESS);
 }
+
