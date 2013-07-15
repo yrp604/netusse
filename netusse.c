@@ -26,7 +26,6 @@
 #include <stdint.h>
 #define _GNU_SOURCE
 #include <fcntl.h>
-#include <stropts.h>
 #include <poll.h>
 
 #include <sys/socket.h>
